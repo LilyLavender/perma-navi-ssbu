@@ -12,6 +12,8 @@ struct NaviState {
     facing: f32,        // 0° is towards camera, 90 right, -90 left
     glow_wait: i32,     // Timer for next glow eff spawn
     glow_handle: u32,
+    tuck_frames: i32,   // Tuck timer
+    tucked: bool,
 }
 
 const NAVI_BLANK: NaviState = NaviState {
@@ -22,6 +24,8 @@ const NAVI_BLANK: NaviState = NaviState {
     facing: 0.0,
     glow_wait: 0,
     glow_handle: 0,
+    tuck_frames: 0,
+    tucked: false,
 };
 
 static mut NAVI: [NaviState; 8] = [NAVI_BLANK; 8];
@@ -162,12 +166,11 @@ unsafe fn navi_glow_update(navi: *mut BattleObjectModuleAccessor, state: &mut Na
 }
 
 // Main follow logic
-unsafe fn navi_follow(boma: *mut BattleObjectModuleAccessor, navi: *mut BattleObjectModuleAccessor, state: &mut NaviState) {
+unsafe fn navi_follow(boma: *mut BattleObjectModuleAccessor, navi: *mut BattleObjectModuleAccessor, state: &mut NaviState, hover: Vector3f, ease: f32) {
     // Travel a percentage towards target position
-    let hover = navi_hover_pos(boma);
-    let speed_x = (hover.x - state.pos[0]) * FOLLOW_EASE;
+    let speed_x = (hover.x - state.pos[0]) * ease;
     state.pos[0] += speed_x;
-    state.pos[1] += (hover.y - state.pos[1]) * FOLLOW_EASE;
+    state.pos[1] += (hover.y - state.pos[1]) * ease;
 
     // Bob up/down
     state.bob_frame = (state.bob_frame + 1.0) % BOB_PERIOD_FRAMES;
@@ -188,6 +191,19 @@ unsafe fn navi_follow(boma: *mut BattleObjectModuleAccessor, navi: *mut BattleOb
     // Set pos
     let pos = Vector3f { x: state.pos[0], y: state.pos[1] + bob, z: hover.z };
     PostureModule::set_pos(navi, &pos);
+}
+
+// ret true if in tumble
+unsafe fn is_tumble(status: i32) -> bool {
+    [
+        *FIGHTER_STATUS_KIND_DAMAGE_FLY,
+        *FIGHTER_STATUS_KIND_DAMAGE_FLY_ROLL,
+        *FIGHTER_STATUS_KIND_DAMAGE_FLY_METEOR,
+        *FIGHTER_STATUS_KIND_DAMAGE_FLY_REFLECT_LR,
+        *FIGHTER_STATUS_KIND_DAMAGE_FLY_REFLECT_U,
+        *FIGHTER_STATUS_KIND_DAMAGE_FLY_REFLECT_D,
+        *FIGHTER_STATUS_KIND_DAMAGE_FALL,
+    ].contains(&status)
 }
 
 // True while side taunt is using Navi
@@ -245,6 +261,7 @@ unsafe extern "C" fn younglink_frame(fighter: &mut L2CFighterCommon) {
         if state.active {
             navi_remove(boma, state);
         }
+        state.tucked = false;
         return;
     }
 
@@ -253,6 +270,21 @@ unsafe extern "C" fn younglink_frame(fighter: &mut L2CFighterCommon) {
         if state.active {
             navi_remove(boma, state);
         }
+        state.tucked = false;
+        return;
+    }
+
+    // Tuck in tumble
+    let is_tumble = is_tumble(status);
+    if !is_tumble {
+        if state.tucked {
+            state.tucked = false;
+        }
+        state.tuck_frames = 0;
+    } else if state.tucked {
+        return;
+    } else if !state.active {
+        state.tucked = true;
         return;
     }
 
@@ -270,7 +302,21 @@ unsafe extern "C" fn younglink_frame(fighter: &mut L2CFighterCommon) {
 
     // Navi opff
     navi_glow_update(navi, state);
-    navi_follow(boma, navi, state);
+    if !is_tumble {
+        navi_follow(boma, navi, state, navi_hover_pos(boma), FOLLOW_EASE);
+        return;
+    }
+
+    // Tuck
+    let head = joint_position(boma, "head");
+    navi_follow(boma, navi, state, Vector3f { x: head.x, y: head.y, z: head.z }, TUCK_EASE);
+    state.tuck_frames += 1;
+    let dist = ((head.x - state.pos[0]).powi(2) + (head.y - state.pos[1]).powi(2)).sqrt();
+    if dist <= TUCK_DISTANCE
+    || state.tuck_frames >= TUCK_MAX_FRAMES {
+        navi_remove(boma, state);
+        state.tucked = true;
+    }
 }
 
 pub fn install() {

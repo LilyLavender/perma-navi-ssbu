@@ -18,6 +18,11 @@ pub const GLOW_REFRESH_FRAMES: i32 = 40;    // Frames glow effect takes to respa
 // Animation
 pub const FLAP_RATE: f32 = 0.7;     // Speed of animation (pct of og)
 
+// Ttuck
+pub const TUCK_EASE: f32 = 0.35;        // Percent of remaining distance Navi moves every frame during tuck
+pub const TUCK_DISTANCE: f32 = 1.5;     // Distance from head at which tuck occurs
+pub const TUCK_MAX_FRAMES: i32 = 12;    // Frames to force a tuck
+
 // Misc
 pub const SIDE_TAUNT_NAVI_END_FRAME: f32 = 142.0;   // Frame of side taunt to spawn new Navi
 pub const ENTRY_NAVI_FRAME: f32 = 60.0;             // Frame of entry anim to spawn Navi
