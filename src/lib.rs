@@ -24,6 +24,7 @@ use table_const::*;
 pub use variables::*;
 
 pub static mut MARKED_COLORS: [bool; 256] = [false; 256];
+pub static mut VOICE_ENABLED: bool = false;
 
 pub fn check_deps() -> bool {
     let mut passed = true;
@@ -45,8 +46,10 @@ pub fn check_deps() -> bool {
 extern "C" fn mods_mounted(_ev: arcropolis_api::Event) {
     const FIGHTER_NAME: &str = "younglink";
     const MARKER_FILE: &str = "navi.marker";
+    const VOICE_MARKER_FILE: &str = "navi_voice.marker";
     let mut any_marked = false;
     for x in 0..256 {
+        // Marker
         if let Ok(_) = std::fs::read(format!(
             "mods:/fighter/{}/model/body/c{:02}/{}",
             FIGHTER_NAME, x, MARKER_FILE
@@ -55,6 +58,16 @@ extern "C" fn mods_mounted(_ev: arcropolis_api::Event) {
                 MARKED_COLORS[x as usize] = true;
             }
             any_marked = true;
+        }
+
+        // Voice marker
+        if let Ok(_) = std::fs::read(format!(
+            "mods:/fighter/{}/model/body/c{:02}/{}",
+            FIGHTER_NAME, x, VOICE_MARKER_FILE
+        )) {
+            unsafe {
+                VOICE_ENABLED = true;
+            }
         }
     }
 
