@@ -190,10 +190,15 @@ unsafe fn navi_follow(boma: *mut BattleObjectModuleAccessor, navi: *mut BattleOb
     state.bob_frame = (state.bob_frame + 1.0) % BOB_PERIOD_FRAMES;
     let bob = (state.bob_frame / BOB_PERIOD_FRAMES * std::f32::consts::TAU).sin() * BOB_AMPLITUDE;
 
-    // Face in direction of travel
+    // Facing direction
     let side = if speed_x.abs() >= FACE_MIN_SPEED {
+        // If moving, use direction of travel
         speed_x.signum()
+    } else if state.target != NONE {
+        // If targetting opponent, face towards YL
+        (PostureModule::pos_x(boma) - state.pos[0]).signum()
     } else {
+        // Follow facing of YL
         PostureModule::lr(boma)
     };
     state.facing += (FACE_ANGLE * side - state.facing) * FACE_EASE;
@@ -305,9 +310,26 @@ unsafe fn nearest_fighter(boma: *mut BattleObjectModuleAccessor) -> u32 {
 
 // Track idle_pos and idle_frames
 unsafe fn idle_update(boma: *mut BattleObjectModuleAccessor, state: &mut NaviState) {
+    // Distance
     let dx = PostureModule::pos_x(boma) - state.idle_pos[0];
     let dy = PostureModule::pos_y(boma) - state.idle_pos[1];
-    if (dx * dx + dy * dy).sqrt() > IDLE_MOVE_DISTANCE {
+
+    // Statuses
+    let status = StatusModule::status_kind(boma);
+    let special_statuses = [
+        *FIGHTER_STATUS_KIND_SPECIAL_N,
+        *FIGHTER_STATUS_KIND_SPECIAL_S,
+        *FIGHTER_STATUS_KIND_SPECIAL_HI,
+        *FIGHTER_STATUS_KIND_SPECIAL_LW,
+        *FIGHTER_LINK_STATUS_KIND_SPECIAL_S2,
+        *FIGHTER_LINK_STATUS_KIND_SPECIAL_HI_HOLD,
+        *FIGHTER_LINK_STATUS_KIND_SPECIAL_HI_END,
+        *FIGHTER_LINK_STATUS_KIND_SPECIAL_LW_BLAST,
+    ];
+
+    // If doing special or moved enough, reset idle timer
+    if special_statuses.contains(&status)
+    || (dx * dx + dy * dy).sqrt() > IDLE_MOVE_DISTANCE {
         state.idle_pos = [PostureModule::pos_x(boma), PostureModule::pos_y(boma)];
         state.idle_frames = 0;
         state.target = NONE;

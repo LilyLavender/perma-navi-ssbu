@@ -35,7 +35,7 @@ pub const WARN_CHANCE_HIGH: f32 = 0.9;          // Chance a warning line plays a
 
 // Idle targetting
 pub const IDLE_FRAMES: i32 = 300;               // Frames idle for before targetting occurs
-pub const IDLE_MOVE_DISTANCE: f32 = 1.0;        // Distance to move to not count as idle
+pub const IDLE_MOVE_DISTANCE: f32 = 3.0;        // Distance to move to not count as idle
 pub const TARGET_OFFSET_Y: f32 = 14.0;          // Height above hip to hover at when targetting
 pub const TARGET_EASE: f32 = 0.08;              // Percent of remaining distance Navi moves every frame during target
 pub const LISTEN_COOLDOWN_FRAMES: i32 = 500;    // Frames after "listen" before a warning line can play
