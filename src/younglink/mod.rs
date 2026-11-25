@@ -130,10 +130,13 @@ unsafe fn navi_spawn(boma: *mut BattleObjectModuleAccessor, state: &mut NaviStat
     // NECESSARY SO SHE'S NOT STUCK AT YL'S ORIGIN!!!!!
     LinkModule::remove_model_constraint(navi, true);
 
+    // Motion
     ArticleModule::change_motion(boma, *FIGHTER_YOUNGLINK_GENERATE_ARTICLE_NAVY, Hash40::new("hover"), false, -1.0);
+    MotionModule::set_rate(navi, FLAP_RATE);
 
-    let hover = navi_hover_pos(boma);
-    state.pos = [hover.x, hover.y];
+    // Init NaviState
+    let head = joint_position(boma, "head");
+    state.pos = [head.x, head.y];
     state.facing = FACE_ANGLE * PostureModule::lr(boma);
     state.glow_wait = 0;
     state.active = true;
@@ -187,6 +190,45 @@ unsafe fn navi_follow(boma: *mut BattleObjectModuleAccessor, navi: *mut BattleOb
     PostureModule::set_pos(navi, &pos);
 }
 
+// True while side taunt is using Navi
+unsafe fn side_taunt_has_navi(boma: *mut BattleObjectModuleAccessor) -> bool {
+    let motion = MotionModule::motion_kind(boma);
+    (
+        motion == hash40("appeal_s_l")
+        || motion == hash40("appeal_s_r")
+    ) && MotionModule::frame(boma) < SIDE_TAUNT_NAVI_END_FRAME
+}
+
+// ret true when Navi shouldn't be out
+unsafe fn navi_hidden(boma: *mut BattleObjectModuleAccessor, status: i32) -> bool {
+    // Dead
+    if status == *FIGHTER_STATUS_KIND_DEAD {
+        return true;
+    }
+
+    // Final Smash
+    if status == *FIGHTER_STATUS_KIND_FINAL
+    || status == *FIGHTER_LINK_STATUS_KIND_FINAL_DASH
+    || status == *FIGHTER_LINK_STATUS_KIND_FINAL_COMBO {
+        return true;
+    }
+
+    // Results screen
+    if status == *FIGHTER_STATUS_KIND_WIN
+    || status == *FIGHTER_STATUS_KIND_LOSE {
+        return true;
+    }
+
+    // Before allowed entry frame
+    if status == *FIGHTER_STATUS_KIND_ENTRY
+    && MotionModule::frame(boma) < ENTRY_NAVI_FRAME {
+        return true;
+    }
+
+    // Young Link isn't visible
+    !VisibilityModule::is_visible(boma)
+}
+
 // opff
 unsafe extern "C" fn younglink_frame(fighter: &mut L2CFighterCommon) {
     let boma = fighter.module_accessor;
@@ -197,15 +239,17 @@ unsafe extern "C" fn younglink_frame(fighter: &mut L2CFighterCommon) {
     let state = &mut *slot;
     let status = StatusModule::status_kind(boma);
 
-    // Deactivate Navi turing taunts
-    if status == *FIGHTER_STATUS_KIND_APPEAL {
-        state.active = false;
-        state.glow_handle = NONE;
+    // Deactivate Navi during side taunt
+    if status == *FIGHTER_STATUS_KIND_APPEAL
+    && side_taunt_has_navi(boma) {
+        if state.active {
+            navi_remove(boma, state);
+        }
         return;
     }
 
-    // Remove Navi on death
-    if status == *FIGHTER_STATUS_KIND_DEAD {
+    // Remove Navi when she shouldn't be out
+    if navi_hidden(boma, status) {
         if state.active {
             navi_remove(boma, state);
         }
