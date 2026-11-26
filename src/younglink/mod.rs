@@ -7,7 +7,7 @@ const NONE: u32 = 0;
 struct NaviState {
     owner: u32,
     active: bool,
-    pos: [f32; 2],
+    pos: [f32; 3],
     bob_frame: f32,
     facing: f32,            // 0° is towards camera, 90 right, -90 left
     glow_wait: i32,         // Timer for next glow eff spawn
@@ -21,12 +21,13 @@ struct NaviState {
     idle_frames: i32,       // ^ Frames YL has stayed at idle_pos for
     target: u32,            // boid of fighter Navi is hovering over
     listen_pending: bool,   // True if Navi should say "listen" when reaching target
+    taunt_anim: bool,       // True while Navi is in her side taunt anim
 }
 
 const NAVI_BLANK: NaviState = NaviState {
     owner: NONE,
     active: false,
-    pos: [0.0; 2],
+    pos: [0.0; 3],
     bob_frame: 0.0,
     facing: 0.0,
     glow_wait: 0,
@@ -40,6 +41,7 @@ const NAVI_BLANK: NaviState = NaviState {
     idle_frames: 0,
     target: NONE,
     listen_pending: false,
+    taunt_anim: false,
 };
 
 static mut NAVI: [NaviState; 8] = [NAVI_BLANK; 8];
@@ -134,6 +136,7 @@ unsafe fn navi_remove(boma: *mut BattleObjectModuleAccessor, state: &mut NaviSta
     }
     state.active = false;
     state.glow_handle = NONE;
+    state.taunt_anim = false;
 }
 
 // Summon Navi
@@ -154,7 +157,7 @@ unsafe fn navi_spawn(boma: *mut BattleObjectModuleAccessor, state: &mut NaviStat
 
     // Init NaviState
     let head = joint_position(boma, "head");
-    state.pos = [head.x, head.y];
+    state.pos = [head.x, head.y, head.z];
     state.facing = FACE_ANGLE * PostureModule::lr(boma);
     state.glow_wait = 0;
     state.active = true;
@@ -180,11 +183,12 @@ unsafe fn navi_glow_update(navi: *mut BattleObjectModuleAccessor, state: &mut Na
 }
 
 // Main follow logic
-unsafe fn navi_follow(boma: *mut BattleObjectModuleAccessor, navi: *mut BattleObjectModuleAccessor, state: &mut NaviState, hover: Vector3f, ease: f32) {
+unsafe fn navi_follow(boma: *mut BattleObjectModuleAccessor, navi: *mut BattleObjectModuleAccessor, state: &mut NaviState, hover: Vector3f, ease: f32, face: Option<f32>) {
     // Travel a percentage towards target position
     let speed_x = (hover.x - state.pos[0]) * ease;
     state.pos[0] += speed_x;
     state.pos[1] += (hover.y - state.pos[1]) * ease;
+    state.pos[2] += (hover.z - state.pos[2]) * ease;
 
     // Bob up/down
     state.bob_frame = (state.bob_frame + 1.0) % BOB_PERIOD_FRAMES;
@@ -201,14 +205,15 @@ unsafe fn navi_follow(boma: *mut BattleObjectModuleAccessor, navi: *mut BattleOb
         // Follow facing of YL
         PostureModule::lr(boma)
     };
-    state.facing += (FACE_ANGLE * side - state.facing) * FACE_EASE;
+    let face = face.unwrap_or(FACE_ANGLE * side);
+    state.facing += (face - state.facing) * FACE_EASE;
 
     // Set rot
     let turn = state.facing - 90.0 * PostureModule::lr(navi);
     PostureModule::set_rot(navi, &Vector3f { x: 0.0, y: turn, z: 0.0 }, 0);
 
     // Set pos
-    let pos = Vector3f { x: state.pos[0], y: state.pos[1] + bob, z: hover.z };
+    let pos = Vector3f { x: state.pos[0], y: state.pos[1] + bob, z: state.pos[2] };
     PostureModule::set_pos(navi, &pos);
 }
 
@@ -411,13 +416,76 @@ unsafe fn is_tumble(status: i32) -> bool {
     ].contains(&status)
 }
 
-// True while side taunt is using Navi
-unsafe fn side_taunt_has_navi(boma: *mut BattleObjectModuleAccessor) -> bool {
+// True during side taunt
+unsafe fn is_side_taunt(boma: *mut BattleObjectModuleAccessor) -> bool {
     let motion = MotionModule::motion_kind(boma);
-    (
-        motion == hash40("appeal_s_l")
-        || motion == hash40("appeal_s_r")
-    ) && MotionModule::frame(boma) < SIDE_TAUNT_NAVI_END_FRAME
+    motion == hash40("appeal_s_l") || motion == hash40("appeal_s_r")
+}
+
+// Reset motion back to hover on side taunt end
+unsafe fn navi_taunt_end(boma: *mut BattleObjectModuleAccessor, navi: *mut BattleObjectModuleAccessor, state: &mut NaviState) {
+    if !state.taunt_anim {
+        return;
+    }
+    ArticleModule::change_motion(boma, *FIGHTER_YOUNGLINK_GENERATE_ARTICLE_NAVY, Hash40::new("hover"), false, -1.0);
+    MotionModule::set_rate(navi, FLAP_RATE);
+    state.taunt_anim = false;
+}
+
+// Handle movement during and while transitioning in & out of side taunt
+unsafe fn navi_side_taunt(boma: *mut BattleObjectModuleAccessor, navi: *mut BattleObjectModuleAccessor, state: &mut NaviState) {
+    let lr = PostureModule::lr(boma);
+    let origin = Vector3f { x: PostureModule::pos_x(boma), y: PostureModule::pos_y(boma), z: PostureModule::pos_z(boma) };
+    let frame = MotionModule::frame(boma) - SIDE_TAUNT_ANIM_OFFSET;
+
+    // Yaw when starting & ending side taunt
+    let (start_yaw, end_yaw) = if MotionModule::motion_kind(boma) == hash40("appeal_s_l") {
+        (SIDE_TAUNT_START_YAW_L, SIDE_TAUNT_END_YAW_L)
+    } else {
+        (SIDE_TAUNT_START_YAW_R, SIDE_TAUNT_END_YAW_R)
+    };
+
+    // Start
+    // Fly to start position of animation
+    if frame < SIDE_TAUNT_ANIM_START {
+        // Start in hover animation to fix issues when spamming taunt
+        navi_taunt_end(boma, navi, state);
+
+        // Aim higher to avoid clipping through YL's head
+        let start_x = origin.x + SIDE_TAUNT_START_X * lr;
+        let lift = ((start_x - state.pos[0]).abs() / SIDE_TAUNT_ARC_DISTANCE).min(1.0) * SIDE_TAUNT_ARC_HEIGHT;
+        let start = Vector3f { x: start_x, y: origin.y + SIDE_TAUNT_START_Y + lift, z: origin.z };
+        navi_follow(boma, navi, state, start, SIDE_TAUNT_EASE, Some(90.0 * lr + start_yaw));
+        return;
+    }
+
+    // End
+    // Fly back from anim end position
+    if frame >= SIDE_TAUNT_ANIM_END {
+        if state.taunt_anim {
+            state.facing = 90.0 * lr + end_yaw;
+        }
+        navi_taunt_end(boma, navi, state);
+        navi_follow(boma, navi, state, navi_hover_pos(boma), FOLLOW_EASE, None);
+        return;
+    }
+
+    // Allow taunt animation to move Navi during the main part of side taunt
+    if !state.taunt_anim
+    || (MotionModule::frame(navi) - frame).abs() > 3.0 {
+        ArticleModule::change_motion(boma, *FIGHTER_YOUNGLINK_GENERATE_ARTICLE_NAVY, Hash40::new_raw(MotionModule::motion_kind(boma)), false, -1.0);
+        MotionModule::set_rate(navi, 1.0);
+        MotionModule::set_frame(navi, frame, true);
+        state.taunt_anim = true;
+    }
+    PostureModule::set_lr(navi, lr);
+    PostureModule::update_rot_y_lr(navi);
+    PostureModule::set_rot(navi, &ZERO, 0);
+    PostureModule::set_pos(navi, &origin);
+
+    // Save pos
+    let body = joint_position(navi, "rot");
+    state.pos = [body.x, body.y, body.z];
 }
 
 // ret true when Navi shouldn't be out
@@ -435,8 +503,13 @@ unsafe fn navi_hidden(boma: *mut BattleObjectModuleAccessor, status: i32) -> boo
     }
 
     // Results screen
-    if status == *FIGHTER_STATUS_KIND_WIN
-    || status == *FIGHTER_STATUS_KIND_LOSE {
+    let motion = MotionModule::motion_kind(boma);
+    if [
+        hash40("win_1"), hash40("win_1_wait"),
+        hash40("win_2"), hash40("win_2_wait"),
+        hash40("win_3"), hash40("win_3_wait"),
+        hash40("lose"),
+    ].contains(&motion) {
         return true;
     }
 
@@ -467,20 +540,31 @@ unsafe extern "C" fn younglink_frame(fighter: &mut L2CFighterCommon) {
     }
     idle_update(boma, state);
 
-    // Deactivate Navi during side taunt
+    // Side taunt
     if status == *FIGHTER_STATUS_KIND_APPEAL
-    && side_taunt_has_navi(boma) {
-        if state.active {
-            navi_remove(boma, state);
-        }
+    && is_side_taunt(boma) {
         state.tucked = false;
         state.idle_frames = 0;
         state.target = NONE;
+        if !state.active
+        || navi_boma(boma).is_null() {
+            navi_spawn(boma, state);
+        }
+        let navi = navi_boma(boma);
+        if navi.is_null() {
+            return;
+        }
+        navi_side_taunt(boma, navi, state);
+        navi_glow_update(navi, state);
         return;
     }
 
     // Remove Navi when she shouldn't be out
-    if navi_hidden(boma, status) {
+    if navi_hidden(boma, status)
+    || (
+        status == *FIGHTER_STATUS_KIND_REBIRTH
+        && fighter.global_table[STATUS_FRAME].get_i32() < REBIRTH_NAVI_FRAME
+    ) {
         if state.active {
             navi_remove(boma, state);
         }
@@ -529,12 +613,13 @@ unsafe extern "C" fn younglink_frame(fighter: &mut L2CFighterCommon) {
     }
 
     // Navi "opff"
+    navi_taunt_end(boma, navi, state);
     navi_glow_update(navi, state);
     if !is_tumble {
         // Follow either yl or opponent
         let hover = navi_idle_target(boma, state);
         let ease = if state.target != NONE { TARGET_EASE } else { FOLLOW_EASE };
-        navi_follow(boma, navi, state, hover, ease);
+        navi_follow(boma, navi, state, hover, ease, None);
 
         // Play warn line when opponent is close
         navi_warn(boma, state);
@@ -543,7 +628,7 @@ unsafe extern "C" fn younglink_frame(fighter: &mut L2CFighterCommon) {
 
     // Tuck
     let head = joint_position(boma, "head");
-    navi_follow(boma, navi, state, Vector3f { x: head.x, y: head.y, z: head.z }, TUCK_EASE);
+    navi_follow(boma, navi, state, Vector3f { x: head.x, y: head.y, z: head.z }, TUCK_EASE, None);
     state.tuck_frames += 1;
     let dist = ((head.x - state.pos[0]).powi(2) + (head.y - state.pos[1]).powi(2)).sqrt();
     if dist <= TUCK_DISTANCE
@@ -554,9 +639,13 @@ unsafe extern "C" fn younglink_frame(fighter: &mut L2CFighterCommon) {
     }
 }
 
+unsafe extern "C" fn younglink_game_appeals(_agent: &mut L2CAgentBase) {}
+
 pub fn install() {
     Agent::new("younglink")
         .set_costume(marked_costumes())
+        .game_acmd("game_appealsl", younglink_game_appeals, Default)
+        .game_acmd("game_appealsr", younglink_game_appeals, Default)
         .on_line(Main, younglink_frame)
         .install();
 }
