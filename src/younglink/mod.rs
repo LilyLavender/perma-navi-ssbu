@@ -291,7 +291,7 @@ unsafe fn nearest_fighter(boma: *mut BattleObjectModuleAccessor) -> u32 {
     let self_id = (*boma).battle_object_id;
     let mut best = NONE;
     let mut best_dist = f32::MAX;
-    for i in 0..lua_bind::FighterManager::total_fighter_num(singletons::FighterManager()) {
+    for i in 0..lua_bind::FighterManager::entry_count(singletons::FighterManager()) {
         // Ignore if fighter isn't hoverable
         let id = Fighter::get_id_from_entry_id(i);
         if id == self_id || !target_hoverable(id) {
@@ -387,7 +387,7 @@ unsafe fn navi_idle_target(boma: *mut BattleObjectModuleAccessor, state: &mut Na
 // ret true if a fighter is within range of Young Link
 unsafe fn fighter_nearby(boma: *mut BattleObjectModuleAccessor, range: f32) -> bool {
     let self_id = (*boma).battle_object_id;
-    for i in 0..lua_bind::FighterManager::total_fighter_num(singletons::FighterManager()) {
+    for i in 0..lua_bind::FighterManager::entry_count(singletons::FighterManager()) {
         // Ignore if fighter isn't hoverable
         let id = Fighter::get_id_from_entry_id(i);
         if id == self_id
