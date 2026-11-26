@@ -12,9 +12,6 @@ pub const FACE_ANGLE: f32 = 65.0;       // Direction facing when flying (0 = cam
 pub const FACE_EASE: f32 = 0.15;        // Percent of remaining rot Navi rots each frame
 pub const FACE_MIN_SPEED: f32 = 0.2;    // Speed of travel required for Navi to face the same direction as Young Link
 
-// Glow
-pub const GLOW_REFRESH_FRAMES: i32 = 40;    // Frames glow effect takes to respawn
-
 // Animation
 pub const FLAP_RATE: f32 = 0.55;    // Speed of animation (pct of og)
 

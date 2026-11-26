@@ -10,7 +10,6 @@ struct NaviState {
     pos: [f32; 3],
     bob_frame: f32,
     facing: f32,            // 0° is towards camera, 90 right, -90 left
-    glow_wait: i32,         // Timer for next glow eff spawn
     glow_handle: u32,
     tuck_frames: i32,       // Tuck timer
     tucked: bool,
@@ -30,7 +29,6 @@ const NAVI_BLANK: NaviState = NaviState {
     pos: [0.0; 3],
     bob_frame: 0.0,
     facing: 0.0,
-    glow_wait: 0,
     glow_handle: 0,
     tuck_frames: 0,
     tucked: false,
@@ -112,9 +110,9 @@ unsafe fn navi_boma(boma: *mut BattleObjectModuleAccessor) -> *mut BattleObjectM
 }
 
 // Summon glow effect
-unsafe fn navi_glow(navi: *mut BattleObjectModuleAccessor) -> u32 {
+unsafe fn navi_glow(navi: *mut BattleObjectModuleAccessor, effect: &str) -> u32 {
     EffectModule::req_follow(
-        navi, Hash40::new("younglink_navy"), Hash40::new("rot"),
+        navi, Hash40::new(effect), Hash40::new("rot"),
         &ZERO, &ZERO, 1.0, true, 0, 0, 0, 0, 0, true, true
     ) as u32
 }
@@ -151,35 +149,24 @@ unsafe fn navi_spawn(boma: *mut BattleObjectModuleAccessor, state: &mut NaviStat
     // NECESSARY SO SHE'S NOT STUCK AT YL'S ORIGIN!!!!!
     LinkModule::remove_model_constraint(navi, true);
 
-    // Motion
+    // Motion & effects
     ArticleModule::change_motion(boma, *FIGHTER_YOUNGLINK_GENERATE_ARTICLE_NAVY, Hash40::new("hover"), false, -1.0);
     MotionModule::set_rate(navi, FLAP_RATE);
+    navi_glow(navi, "younglink_navy_start");
 
     // Init NaviState
     let head = joint_position(boma, "head");
     state.pos = [head.x, head.y, head.z];
     state.facing = FACE_ANGLE * PostureModule::lr(boma);
-    state.glow_wait = 0;
     state.active = true;
 }
 
-// "opff" for glow, handles when a new one will get summonned and summons it
+// "opff" for glow, handles summoning effect if it doesn't exist
 unsafe fn navi_glow_update(navi: *mut BattleObjectModuleAccessor, state: &mut NaviState) {
-    // Tick glow_wait timer
-    if state.glow_wait > 0 {
-        state.glow_wait -= 1;
+    if state.glow_handle == NONE
+    || !EffectModule::is_exist_effect(navi, state.glow_handle) {
+        state.glow_handle = navi_glow(navi, "younglink_navy_loop");
     }
-
-    // ret if timer isn't finished and effect exists
-    if state.glow_wait > 0
-    && state.glow_handle != NONE
-    && EffectModule::is_exist_effect(navi, state.glow_handle) {
-        return;
-    }
-
-    // Spawn new effect
-    state.glow_handle = navi_glow(navi);
-    state.glow_wait = GLOW_REFRESH_FRAMES;
 }
 
 // Main follow logic
@@ -481,6 +468,11 @@ unsafe fn navi_side_taunt(boma: *mut BattleObjectModuleAccessor, navi: *mut Batt
         MotionModule::set_rate(navi, 1.0);
         MotionModule::set_frame(navi, frame, true);
         state.taunt_anim = true;
+
+        // Summon vanilla glow effect
+        EffectModule::kill_kind(navi, Hash40::new("younglink_navy_loop"), false, true);
+        EffectModule::kill_kind(navi, Hash40::new("younglink_navy"), false, true);
+        state.glow_handle = navi_glow(navi, "younglink_navy");
     }
     PostureModule::set_lr(navi, lr);
     PostureModule::update_rot_y_lr(navi);
