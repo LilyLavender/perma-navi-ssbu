@@ -24,7 +24,7 @@ use table_const::*;
 pub use variables::*;
 
 pub static mut MARKED_COLORS: [bool; 256] = [false; 256];
-pub static mut VOICE_ENABLED: bool = false;
+pub static mut VOICE_COLORS: [bool; 256] = [false; 256];
 
 pub fn check_deps() -> bool {
     let mut passed = true;
@@ -51,7 +51,7 @@ extern "C" fn mods_mounted(_ev: arcropolis_api::Event) {
     for x in 0..256 {
         // Marker
         if let Ok(_) = std::fs::read(format!(
-            "mods:/fighter/{}/model/body/c{:02}/{}",
+            "mods:/fighter/{}/motion/navy/c{:02}/{}",
             FIGHTER_NAME, x, MARKER_FILE
         )) {
             unsafe {
@@ -62,11 +62,11 @@ extern "C" fn mods_mounted(_ev: arcropolis_api::Event) {
 
         // Voice marker
         if let Ok(_) = std::fs::read(format!(
-            "mods:/fighter/{}/model/body/c{:02}/{}",
+            "mods:/fighter/{}/motion/navy/c{:02}/{}",
             FIGHTER_NAME, x, VOICE_MARKER_FILE
         )) {
             unsafe {
-                VOICE_ENABLED = true;
+                VOICE_COLORS[x as usize] = true;
             }
         }
     }
@@ -76,6 +76,11 @@ extern "C" fn mods_mounted(_ev: arcropolis_api::Event) {
     }
 
     younglink::install();
+}
+
+pub unsafe fn voice_enabled(boma: *mut BattleObjectModuleAccessor) -> bool {
+    let color = WorkModule::get_int(boma, *FIGHTER_INSTANCE_WORK_ID_INT_COLOR);
+    color >= 0 && color < 256 && VOICE_COLORS[color as usize]
 }
 
 pub fn marked_costumes() -> Vec<usize> {

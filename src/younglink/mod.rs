@@ -207,7 +207,7 @@ unsafe fn navi_follow(boma: *mut BattleObjectModuleAccessor, navi: *mut BattleOb
 // Play sound effect w randomized pitch
 unsafe fn play_navi_vc(boma: *mut BattleObjectModuleAccessor, state: &mut NaviState, line: &str, cooldown: i32) {
     // ret if voice is off or cooldown is active
-    if !VOICE_ENABLED
+    if !voice_enabled(boma)
     || state.voice_cooldown > 0 {
         return;
     }
@@ -337,7 +337,7 @@ unsafe fn navi_idle_target(boma: *mut BattleObjectModuleAccessor, state: &mut Na
     && state.idle_frames >= IDLE_FRAMES {
         state.target = nearest_fighter(boma);
         state.listen_pending = state.target != NONE
-                            && VOICE_ENABLED
+                            && voice_enabled(boma)
                             && rand(state, 0) < LISTEN_CHANCE;
     }
 
