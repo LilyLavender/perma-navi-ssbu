@@ -363,8 +363,12 @@ unsafe fn navi_idle_target(boma: *mut BattleObjectModuleAccessor, state: &mut Na
     if state.target == NONE {
         return navi_hover_pos(boma);
     }
-    let hip = joint_position(sv_battle_object::module_accessor(state.target), "hip");
-    let point = Vector3f { x: hip.x, y: hip.y + TARGET_OFFSET_Y, z: hip.z };
+    let t_boma = sv_battle_object::module_accessor(state.target);
+    let node = WorkModule::get_param_int64(t_boma, hash40("palutena_autoaimbullet_target_node"), 0);
+    let mut center = JointOut { v: Vector3f { x: 0.0, y: 0.0, z: 0.0 }, _pad: 0.0 };
+    ModelModule::joint_global_position(t_boma, Hash40::new_raw(node), &mut center.v, true);
+    let height = WorkModule::get_param_float(t_boma, hash40("height"), 0);
+    let point = Vector3f { x: center.v.x, y: center.v.y + height * 0.5 + TARGET_OFFSET_Y, z: center.v.z };
 
     // Play "listen" line once she's close enough to the target
     if state.listen_pending {
